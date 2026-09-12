@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       targets:
-        description: "Select target platforms (comma separated, e.g. R2C,R2S,R3S,R4S,X86 ;leave blank for all, case-insensitive)"
+        description: "Select target platforms (comma separated, e.g. R2C,R2S,R3S,R4S,X86; leave blank for all, case-insensitive)"
         required: false
         type: string
         default: ""
@@ -35,42 +35,87 @@ on:
         type: boolean
         default: true
 
+
 jobs:
+
+  # ============================================================
+  # Setup matrix
+  # ============================================================
   setup:
     runs-on: ubuntu-24.04
+
     if: github.event.repository.owner.id == github.event.sender.id
+
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
     steps:
-      - id: set-matrix
+      - name: Set build matrix
+        id: set-matrix
         shell: bash
         run: |
           # All possible targets
           all_targets='[
-            {"name": "R2C", "script_dir": "R2S", "arch": "rockchip/armv8", "arch_suffix": "3328"},
-            {"name": "R2S", "script_dir": "R2S", "arch": "rockchip/armv8", "arch_suffix": "3328"},
-            {"name": "R3S", "script_dir": "R4S", "arch": "rockchip/armv8", "arch_suffix": "3566"},
-            {"name": "R4S", "script_dir": "R4S", "arch": "rockchip/armv8", "arch_suffix": "3399"},
-            {"name": "X86", "script_dir": "X86", "arch": "x86/64", "arch_suffix": ""}
+            {"name":"R2C","script_dir":"R2S","arch":"rockchip/armv8","arch_suffix":"3328"},
+            {"name":"R2S","script_dir":"R2S","arch":"rockchip/armv8","arch_suffix":"3328"},
+            {"name":"R3S","script_dir":"R4S","arch":"rockchip/armv8","arch_suffix":"3566"},
+            {"name":"R4S","script_dir":"R4S","arch":"rockchip/armv8","arch_suffix":"3399"},
+            {"name":"X86","script_dir":"X86","arch":"x86/64","arch_suffix":""}
           ]'
 
-          # User selected targets
+          # Get user input
           inputs_targets="${{ inputs.targets }}"
-          # Replace Chinese comma with English comma, convert to uppercase
-          inputs_targets=$(echo "$inputs_targets" | sed 's/，/,/g' | tr 'a-z' 'A-Z' | xargs)
 
+          # Chinese comma -> English comma
+          inputs_targets=$(echo "$inputs_targets" | sed 's/，/,/g')
+
+          # Uppercase and remove spaces
+          inputs_targets=$(echo "$inputs_targets" | tr 'a-z' 'A-Z' | tr -d ' ')
+
+          echo "Requested targets: $inputs_targets"
+
+          # Empty = build all
           if [[ -z "$inputs_targets" ]]; then
-            # If input is empty, run all targets
-            echo "matrix=$(echo "$all_targets" | jq -c '{include: .}')" >> $GITHUB_OUTPUT
-          else
-            # Filter targets based on input
-            filtered_targets=$(echo "$all_targets" | jq --arg targets "$inputs_targets" '[.[] | select(.name as $name | ($targets | split(",") | map(gsub(" "; "")) | index($name))) ]')
-            echo "matrix=$(echo "$filtered_targets" | jq -c '{include: .}')" >> $GITHUB_OUTPUT
-          fi
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
 
+            matrix=$(echo "$all_targets" | jq -c '{include: .}')
+
+          else
+
+            matrix=$(echo "$all_targets" | jq -c \
+              --arg targets "$inputs_targets" \
+              '{
+                include:
+                  [
+                    .[] |
+                    select(
+                      ($targets | split(",")) | index(.name)
+                    )
+                  ]
+              }')
+
+          fi
+
+          echo "Generated matrix:"
+          echo "$matrix" | jq .
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+
+  # ============================================================
+  # Build
+  # ============================================================
   build:
     needs: setup
-    env: # default values, will be overridden later
+
+    runs-on: ubuntu-24.04
+
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    env:
       seed: dummy
       artifact_prefix: dummy
       sha_match: dummy
@@ -81,69 +126,79 @@ jobs:
       TARGET_DEVICE_ARCH: dummy
       latest_release: dummy
 
-    runs-on: ubuntu-24.04
-    if: github.event.repository.owner.id == github.event.sender.id
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-    steps:
-      - name: Generate platform variables and print
-        id: genvars
-        run: |
-          # Debug: Print all input variables
-          echo "inputs.targets: '${{ inputs.targets }}'"
-          echo "inputs.upload_source: '${{ inputs.upload_source }}'"
-          echo "inputs.build_firmware: '${{ inputs.build_firmware }}'"
-          echo "matrix.name: '${{ matrix.name }}'"
-          echo "matrix.script_dir: '${{ matrix.script_dir }}'"
-          echo "matrix.arch: '${{ matrix.arch }}'"
-          echo "matrix.arch_suffix: '${{ matrix.arch_suffix }}'"
-          echo "github.run_id: '${{ github.run_id }}'"
 
-          # Platform name in lowercase
+    steps:
+
+      # ========================================================
+      # Generate variables
+      # ========================================================
+      - name: Generate platform variables
+        id: genvars
+        shell: bash
+        run: |
+          echo "============================================"
+          echo "inputs.targets        = '${{ inputs.targets }}'"
+          echo "inputs.upload_source  = '${{ inputs.upload_source }}'"
+          echo "inputs.build_firmware = '${{ inputs.build_firmware }}'"
+          echo "matrix.name           = '${{ matrix.name }}'"
+          echo "matrix.script_dir     = '${{ matrix.script_dir }}'"
+          echo "matrix.arch           = '${{ matrix.arch }}'"
+          echo "matrix.arch_suffix    = '${{ matrix.arch_suffix }}'"
+          echo "github.run_id         = '${{ github.run_id }}'"
+          echo "============================================"
+
           name_lower=$(echo "${{ matrix.name }}" | tr 'A-Z' 'a-z')
 
-          # seed rule
+          # Seed directory
           seed="${{ matrix.name }}"
 
-          # artifact_prefix rule
+          # Artifact prefix
           artifact_prefix="${{ matrix.name }}-GC404"
 
-          # sha_match rule
+          # SHA matching
           sha_match="$name_lower"
 
-          # ext4_zip/sfs_zip rule
+          # Image filename patterns
           if [ "$name_lower" = "x86" ]; then
-            ext4_zip='*ext4-combined*'
-            sfs_zip='*squashfs-combined*'
-            sysupgrade_glob='*combined-efi.img*'
+            ext4_zip="*ext4-combined*"
+            sfs_zip="*squashfs-combined*"
+            sysupgrade_glob="*combined-efi.img*"
           else
             ext4_zip="*$name_lower*ext4*"
             sfs_zip="*$name_lower*squashfs*"
-            sysupgrade_glob='*sysupgrade.img*'
+            sysupgrade_glob="*sysupgrade.img*"
           fi
 
-          # workerid variable
-          workerid=${{ github.run_id }}
+          workerid="${{ github.run_id }}"
 
-          # openwrt_source_name archive name
           openwrt_source_name="openwrt-source-${{ matrix.name }}-${workerid}.tar"
 
-          cat <<EOF | tee -a $GITHUB_ENV
-          seed=$seed
-          artifact_prefix=$artifact_prefix
-          sha_match=$sha_match
-          ext4_zip=$ext4_zip
-          sfs_zip=$sfs_zip
-          sysupgrade_glob=$sysupgrade_glob
-          openwrt_source_name=$openwrt_source_name
-          EOF
+          {
+            echo "seed=$seed"
+            echo "artifact_prefix=$artifact_prefix"
+            echo "sha_match=$sha_match"
+            echo "ext4_zip=$ext4_zip"
+            echo "sfs_zip=$sfs_zip"
+            echo "sysupgrade_glob=$sysupgrade_glob"
+            echo "openwrt_source_name=$openwrt_source_name"
+          } >> "$GITHUB_ENV"
 
+
+      # ========================================================
+      # System information
+      # ========================================================
       - name: Show system info
         run: |
-          echo -e "Total CPU cores\t: $(nproc)"
-          cat /proc/cpuinfo | grep 'model name'
+          echo "CPU cores: $(nproc)"
+          echo
+          lscpu | grep -E 'Model name|CPU\(s\)'
+          echo
+          df -h
 
+
+      # ========================================================
+      # Maximize build space
+      # ========================================================
       - name: Maximize build space
         if: inputs.build_firmware
         uses: smallprogram/maximize-build-space@master
@@ -151,154 +206,413 @@ jobs:
           swap-size-mb: 1024
           temp-reserve-mb: 4608
           root-reserve-mb: 3584
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+          remove-codeql: true
 
+
+      # ========================================================
+      # Checkout repository
+      # ========================================================
       - name: Checkout
         uses: actions/checkout@main
 
+
+      # ========================================================
+      # Build dependencies
+      # ========================================================
       - name: Init build dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
+        shell: bash
         run: |
           sudo -E apt-get -qq update
+
           sudo /bin/bash -c "$(curl -sL https://git.io/vokNn)"
-          sudo -E apt-fast -y -qq install asciidoc bash bcc bin86 binutils bison bzip2 clang file flex g++ g++-multilib gawk gcc-multilib gettext git gzip help2man intltool libbpf-dev libboost-dev libelf-dev libncurses-dev libssl-dev libthread-queue-any-perl libusb-dev libxml-parser-perl linux-tools-generic llvm make patch perl-modules pkg-config python3-dev python3-pip python3-pyelftools python3-setuptools rsync sharutils swig time unzip util-linux wget xsltproc zlib1g-dev zip zstd
-          sudo -E apt-fast -y -qq install dos2unix dwarves jq npm quilt
+
+          sudo -E apt-fast -y -qq install \
+            asciidoc \
+            bash \
+            bcc \
+            bin86 \
+            binutils \
+            bison \
+            bzip2 \
+            clang \
+            file \
+            flex \
+            g++ \
+            g++-multilib \
+            gawk \
+            gcc-multilib \
+            gettext \
+            git \
+            gzip \
+            help2man \
+            intltool \
+            libbpf-dev \
+            libboost-dev \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            libthread-queue-any-perl \
+            libusb-dev \
+            libxml-parser-perl \
+            linux-tools-generic \
+            llvm \
+            make \
+            patch \
+            perl-modules \
+            pkg-config \
+            python3-dev \
+            python3-pip \
+            python3-pyelftools \
+            python3-setuptools \
+            rsync \
+            sharutils \
+            swig \
+            time \
+            unzip \
+            util-linux \
+            wget \
+            xsltproc \
+            zlib1g-dev \
+            zip \
+            zstd \
+            dos2unix \
+            dwarves \
+            jq \
+            npm \
+            quilt
+
           sudo -E npm install -g pnpm
           sudo -E npm install -g n
           sudo -E n stable
+
           pip3 install --user -U pylibfdt --break-system-packages
+
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
-          sudo -E git config --global user.name 'GitHub Actions' && git config --global user.email 'noreply@github.com'
+
+          sudo -E git config --global user.name "GitHub Actions"
+          sudo -E git config --global user.email "noreply@github.com"
           sudo -E git config --global core.abbrev auto
+
+          echo
+          echo "===== Disk space ====="
           df -h
 
+
+      # ========================================================
+      # Prepare MixedWrt
+      # ========================================================
       - name: Prepare Mixedwrt
+        shell: bash
         run: |
-          sudo chown -R runner:runner /home/runner/work/YAOF
-          cp -r ./SCRIPTS/${{ matrix.script_dir }}/. ./SCRIPTS/
-          cp -r ./SCRIPTS/. ./
+          sudo chown -R runner:runner "$GITHUB_WORKSPACE"
+
+          cp -r "./SCRIPTS/${{ matrix.script_dir }}/." "./SCRIPTS/"
+          cp -r "./SCRIPTS/." "./"
+
           /bin/bash 01_get_ready.sh
 
+
+      # ========================================================
+      # Prepare packages
+      # ========================================================
       - name: Prepare Package
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
           cp -r ../SCRIPTS/. ./
+
           /bin/bash 02_prepare_package.sh
           /bin/bash 02_target_only.sh
           /bin/bash 04_remove_upx.sh
 
-      - name: QTMDFW4
-        working-directory: ${{ github.workspace }}/openwrt
-        run: |
-          cp -rf ../SEED/${{ env.seed }}/config.seed .config
 
+      # ========================================================
+      # Apply config.seed
+      # ========================================================
+      - name: Apply config.seed
+        working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
+        run: |
+          echo "Using seed: ${{ env.seed }}"
+
+          if [ ! -f "../SEED/${{ env.seed }}/config.seed" ]; then
+            echo "ERROR: config.seed not found:"
+            echo "../SEED/${{ env.seed }}/config.seed"
+            exit 1
+          fi
+
+          cp -f "../SEED/${{ env.seed }}/config.seed" .config
+
+          echo
+          echo "===== Seed config ====="
+          grep -E '^CONFIG_TARGET|^CONFIG_PACKAGE_(kmod-|luci-app-|xray|sing-box)' .config || true
+
+
+      # ========================================================
+      # Translation
+      # ========================================================
       - name: Convert Translation
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
           /bin/bash 03_convert_translation.sh
+
+
+      # ========================================================
+      # ACL
+      # ========================================================
       - name: Add ACL
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
           /bin/bash 05_create_acl_for_luci.sh -a
+
+
+      # ========================================================
+      # Fix permissions
+      # ========================================================
       - name: Fix Permissions
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
-          sudo -E chmod -R 755 ./08_fix_permissions.sh
+          sudo chmod -R 755 ./08_fix_permissions.sh
           /bin/bash 08_fix_permissions.sh
 
+
+      # ========================================================
+      # Defconfig
+      # ========================================================
       - name: Make Config
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
           make defconfig
 
+          echo
+          echo "===== Final target configuration ====="
+          grep -E '^CONFIG_TARGET|^CONFIG_PACKAGE_(kmod-|luci-app-|xray|sing-box)' .config || true
+
+
+      # ========================================================
+      # Detect architecture
+      # ========================================================
       - name: Get Architecture
         id: getarch
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
-          TARGET_DEVICE_ARCH="$(grep "^CONFIG_TARGET_.*_.*=y$" ".config" | head -n 1 | sed 's/^CONFIG_TARGET_//g' | awk -F '_' '{print $1}')"
+          TARGET_DEVICE_ARCH="$(
+            grep '^CONFIG_TARGET_.*_.*=y$' .config |
+            head -n 1 |
+            sed 's/^CONFIG_TARGET_//g' |
+            awk -F '_' '{print $1}'
+          )"
+
           if [ -n "${{ matrix.arch_suffix }}" ]; then
             TARGET_DEVICE_ARCH="$TARGET_DEVICE_ARCH-${{ matrix.arch_suffix }}"
           fi
-          echo "TARGET_DEVICE_ARCH=$TARGET_DEVICE_ARCH" >> $GITHUB_ENV
-          latest_release="$(curl -s https://github.com/openwrt/openwrt/tags | grep -Eo "v[0-9\.]+\-*r*c*[0-9]*.tar.gz" | sed -n '/[2-9][5-9]/p' | sed -n 1p | sed 's/.tar.gz//g' | sed 's/v//g')"
-          echo "latest_release=${latest_release}" >> $GITHUB_ENV
 
-          echo "Package folder ${{ env.openwrt_source_name }}"
-          cd ..
-          # Must use tar, otherwise symbolic links will be incomplete
-          if [ "${{ inputs.upload_source }}" = "true" ]; then
-            tar -cf ${{ env.openwrt_source_name }} openwrt
+          echo "TARGET_DEVICE_ARCH=$TARGET_DEVICE_ARCH" >> "$GITHUB_ENV"
+
+          echo "Detected architecture: $TARGET_DEVICE_ARCH"
+
+          # Try to obtain the latest OpenWrt release.
+          latest_release="$(
+            git ls-remote --tags https://github.com/openwrt/openwrt.git |
+            grep -oE 'refs/tags/v[0-9]+\.[0-9]+(\.[0-9]+)?$' |
+            sed 's#refs/tags/v##' |
+            sort -V |
+            tail -n 1
+          )"
+
+          if [ -z "$latest_release" ]; then
+            latest_release="25.12"
           fi
 
-      # upload_source
+          echo "latest_release=$latest_release" >> "$GITHUB_ENV"
+
+          echo "Latest OpenWrt release: $latest_release"
+
+          cd ..
+
+          if [ "${{ inputs.upload_source }}" = "true" ]; then
+            echo "Creating source archive..."
+            tar -cf "$openwrt_source_name" openwrt
+            ls -lh "$openwrt_source_name"
+          fi
+
+
+      # ========================================================
+      # Upload source
+      # ========================================================
       - name: Upload Source Archive
         if: inputs.upload_source
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.openwrt_source_name }}
-          path: |
-            ${{ env.openwrt_source_name }}
+          path: ${{ env.openwrt_source_name }}
           retention-days: 5
 
+
+      # ========================================================
+      # Cache
+      # ========================================================
       - name: Cache
         if: inputs.build_firmware
         uses: HiGarfield/cachewrtbuild@main
         with:
           mixkey: ${{ env.TARGET_DEVICE_ARCH }}
           prefix: ${{ github.workspace }}/openwrt
-          skip_saving: ${{ !inputs.build_firmware }}
+          skip_saving: false
 
+
+      # ========================================================
+      # Download source packages
+      # ========================================================
       - name: Make Download
         if: inputs.build_firmware
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
-          if [ "${{ inputs.upload_source }}" = "true" ] && [ -f ../${{ env.openwrt_source_name }} ]; then
-            rm ../${{ env.openwrt_source_name }}
+          if [ "${{ inputs.upload_source }}" = "true" ] &&
+             [ -f "../${{ env.openwrt_source_name }}" ]; then
+            rm -f "../${{ env.openwrt_source_name }}"
           fi
-          make download -j50
-          make -j$(($(nproc) + 1)) package/network/utils/nftables/refresh V=s
 
-      # build_firmware
-      - name: Compile Openwrt
+          make download -j50
+
+          make -j"$(($(nproc) + 1))" \
+            package/network/utils/nftables/refresh V=s
+
+
+      # ========================================================
+      # Compile
+      # ========================================================
+      - name: Compile OpenWrt
         if: inputs.build_firmware
-        working-directory: ${{ github.workspace }}/openwrt
         id: compileopenwrt
         continue-on-error: true
+        working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
-          IGNORE_ERRORS=1 make -j$(($(nproc) + 1))
-          echo $?
+          IGNORE_ERRORS=1 make -j"$(($(nproc) + 1))"
+          exit_code=$?
+
+          echo "Build exit code: $exit_code"
+
+          exit "$exit_code"
+
+
+      # ========================================================
+      # Rebuild with V=s if failed
+      # ========================================================
       - name: If Error
         if: steps.compileopenwrt.outcome == 'failure'
         working-directory: ${{ github.workspace }}/openwrt
+        shell: bash
         run: |
-          cat ./.config
-          echo '================================================================'
+          echo "============================================"
+          echo "BUILD FAILED - CONFIG"
+          echo "============================================"
+
+          cat .config
+
+          echo "============================================"
+          echo "BUILD FAILED - VERBOSE BUILD"
+          echo "============================================"
+
           make -j1 V=s
 
+
+      # ========================================================
+      # Organize firmware
+      # ========================================================
       - name: Organize files
         if: inputs.build_firmware
         id: organize
-        env:
-          LATEST_RELEASE: ${{ env.latest_release }}
+        shell: bash
         run: |
-          rm -rf ./artifact/
-          mkdir -p ./artifact/
-          mv openwrt/bin/targets/${{ matrix.arch }}/${{ env.sysupgrade_glob }} ./artifact/ || true
-          cd ./artifact/
-          ls -Ahl
-          gzip -d *.gz || true
-          gzip --best *.img
-          ls -Ahl
-          sha256sum openwrt*${{ env.sha_match }}* | tee ${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}.sha256sum
-          zip ${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}-ext4.zip ${{ env.ext4_zip }}
-          zip ${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}-sfs.zip ${{ env.sfs_zip }}
-          ls -Ahl
+          rm -rf ./artifact
+          mkdir -p ./artifact
 
+          echo "============================================"
+          echo "Firmware output directory"
+          echo "============================================"
+
+          find openwrt/bin/targets \
+            -maxdepth 3 \
+            -type f \
+            | sort
+
+          echo
+          echo "============================================"
+          echo "Collect sysupgrade image"
+          echo "============================================"
+
+          find "openwrt/bin/targets/${{ matrix.arch }}" \
+            -type f \
+            -name "${{ env.sysupgrade_glob }}" \
+            -exec cp {} ./artifact/ \; || true
+
+          cd ./artifact
+
+          echo
+          echo "Collected files:"
+          ls -lah
+
+          # Decompress gzip files
+          for f in *.gz; do
+            [ -e "$f" ] || continue
+            gzip -d "$f" || true
+          done
+
+          # Recompress images using maximum gzip compression
+          for f in *.img; do
+            [ -e "$f" ] || continue
+            gzip --best "$f"
+          done
+
+          echo
+          echo "Final artifact files:"
+          ls -lah
+
+          # Generate checksum if firmware exists
+          if compgen -G "*" > /dev/null; then
+            sha256sum * \
+              | tee "${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}.sha256sum"
+          fi
+
+          # ext4 package
+          if compgen -G "${{ env.ext4_zip }}" > /dev/null; then
+            zip \
+              "${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}-ext4.zip" \
+              ${{ env.ext4_zip }}
+          fi
+
+          # squashfs package
+          if compgen -G "${{ env.sfs_zip }}" > /dev/null; then
+            zip \
+              "${{ env.artifact_prefix }}-$(date +%Y-%m-%d)-${{ env.latest_release }}-sfs.zip" \
+              ${{ env.sfs_zip }}
+          fi
+
+          echo
+          echo "============================================"
+          echo "ZIP files"
+          echo "============================================"
+
+          ls -lah
+
+
+      # ========================================================
+      # Create GitHub release
+      # ========================================================
       - name: Create release
         if: inputs.build_firmware
         id: create_release
@@ -313,14 +627,35 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: ./artifact/*.zip
 
-      - name: Print Disk Space After
-        run: df -h
 
+      # ========================================================
+      # Disk space
+      # ========================================================
+      - name: Print Disk Space After
+        if: always()
+        run: |
+          echo "============================================"
+          echo "Disk space after build"
+          echo "============================================"
+          df -h
+
+
+      # ========================================================
+      # Trigger badge sync
+      # ========================================================
       - name: Trigger badge sync for current platform
-        if: github.workflow == 'OpenWrt-Matrix' && inputs.build_firmware && steps.create_release.outcome != 'skipped' && always()
+        if: >
+          github.workflow == 'OpenWrt-Matrix' &&
+          inputs.build_firmware &&
+          steps.create_release.outcome != 'skipped' &&
+          always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          echo "Triggering badge sync for ${{ matrix.name }} with status: ${{ steps.create_release.outcome }}"
+          echo "Triggering badge sync for ${{ matrix.name }}"
+          echo "Status: ${{ steps.create_release.outcome }}"
+
           gh workflow run "${{ matrix.name }}-OpenWrt.yml" \
-            --field badge_status="${{ steps.create_release.outcome }}" || echo "Failed to trigger ${{ matrix.name }} workflow"
+            --field badge_status="${{ steps.create_release.outcome }}" \
+            || echo "Failed to trigger ${{ matrix.name }} workflow"
