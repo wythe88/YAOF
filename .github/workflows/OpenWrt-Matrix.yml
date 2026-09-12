@@ -87,8 +87,10 @@ jobs:
                 include:
                   [
                     .[] |
+                    . as $item |
                     select(
-                      ($targets | split(",")) | index(.name)
+                      ($targets | split(",")) |
+                     index($item.name)
                     )
                   ]
               }')
