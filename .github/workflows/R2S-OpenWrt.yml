@@ -1,6 +1,8 @@
 name: R2S-OpenWrt
 
 on:
+permissions:
+  contents: write
   workflow_dispatch:
     inputs:
       upload_source:
