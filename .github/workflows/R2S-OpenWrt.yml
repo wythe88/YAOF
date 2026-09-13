@@ -1,8 +1,9 @@
 name: R2S-OpenWrt
 
+permissions:
+  contents: write
+
 on:
-   permissions:
-   contents: write
   workflow_dispatch:
     inputs:
       upload_source:
@@ -10,67 +11,38 @@ on:
         required: false
         type: boolean
         default: false
-
       build_firmware:
         description: "Build and publish firmware"
         required: false
         type: boolean
         default: true
-
       badge_status:
-        description: "Badge status var (keep empty)"
+        description: "badge status var（keep empty）"
         required: false
         type: string
-        default: ""
+        default: ''
 
   watch:
-    types:
-      - started
-
+    types: started
 
 jobs:
-
-  # ============================================================
-  # Build R2S
-  # ============================================================
   build:
-    name: Build R2S
-
-    if: >
-      github.event.repository.owner.id == github.event.sender.id &&
-      inputs.badge_status == ''
-
     uses: ./.github/workflows/OpenWrt-Matrix.yml
-
+    if: github.event.repository.owner.id == github.event.sender.id && inputs.badge_status == ''
     with:
       targets: "R2S"
+      upload_source: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_source }}
+      build_firmware: ${{ (github.event_name == 'workflow_dispatch' && inputs.build_firmware) || github.event_name != 'workflow_dispatch' }}
+    secrets: inherit
 
-      upload_source: ${{ inputs.upload_source }}
-
-      build_firmware: ${{ inputs.build_firmware }}
-
-
-  # ============================================================
-  # Badge status synchronization
-  # ============================================================
   sync_badge:
-    name: Sync badge status
-
     if: inputs.badge_status != ''
-
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
     steps:
-
       - name: Sync badge status
-        shell: bash
         run: |
-          echo "============================================"
-          echo "Syncing badge status"
-          echo "Status: ${{ inputs.badge_status }}"
-          echo "============================================"
-
-          if [ "${{ inputs.badge_status }}" = "success" ]; then
+          echo "Syncing badge status ...( ${{ inputs.badge_status }} )"
+          if [ "${{ inputs.badge_status }}" == "success" ]; then
             exit 0
           else
             exit 1
