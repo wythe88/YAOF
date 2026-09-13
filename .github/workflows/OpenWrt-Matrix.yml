@@ -2,7 +2,7 @@
 name: OpenWrt-Matrix
 
 on:
-permissions:
+ permissions:
   contents: write
   workflow_call:
     inputs:
