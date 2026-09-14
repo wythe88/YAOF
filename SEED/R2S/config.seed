@@ -3,6 +3,7 @@ INITIALIZATION
 CONFIG_TARGET_rockchip=y
 CONFIG_TARGET_rockchip_armv8=y
 CONFIG_TARGET_rockchip_armv8_DEVICE_friendlyarm_nanopi-r2s=y
+
 CONFIG_TARGET_KERNEL_PARTSIZE=32
 CONFIG_TARGET_ROOTFS_PARTSIZE=822
 
@@ -13,6 +14,7 @@ CONFIG_KERNEL_WERROR is not set
 
 CONFIG_KERNEL_BUILD_DOMAIN=“buildhost”
 CONFIG_KERNEL_BUILD_USER=“builder”
+
 CONFIG_COLLECT_KERNEL_DEBUG=y
 CONFIG_REPRODUCIBLE_DEBUG_INFO=y
 
@@ -34,16 +36,12 @@ CONFIG_PACKAGE_addition-trans-zh=y
 CONFIG_PACKAGE_autocore-arm=y
 CONFIG_PACKAGE_ethtool=y
 
-DNS
-
 CONFIG_PACKAGE_dnsmasq-full=y
 CONFIG_PACKAGE_dnsmasq_full_ipset=y
 
 CONFIG_PACKAGE_dnsmasq_full_broken_rtc is not set
 
 CONFIG_PACKAGE_dnsmasq is not set
-
-Filesystem
 
 CONFIG_PACKAGE_kmod-fs-f2fs=y
 
@@ -57,11 +55,12 @@ CONFIG_PACKAGE_ddns-scripts-dnspod=y
 CONFIG_PACKAGE_ddns-scripts-aliyun=y
 CONFIG_PACKAGE_bind-host=y
 
-FIREWALL / NETWORK
+FIREWALL
 
 CONFIG_PACKAGE_firewall is not set
 
 CONFIG_PACKAGE_firewall4=y
+
 CONFIG_PACKAGE_kmod-nft-offload=y
 CONFIG_PACKAGE_kmod-nft-fullcone=y
 
@@ -100,10 +99,12 @@ WIREGUARD
 
 CONFIG_PACKAGE_luci-proto-wireguard=y
 
-DDNS / NETWORK TOOLS
+TAILSCALE
 
-CONFIG_PACKAGE_qrencode=y
-CONFIG_PACKAGE_htop=y
+如果当前源码/feeds存在以下两个包，则保留
+
+CONFIG_PACKAGE_tailscale=y
+CONFIG_PACKAGE_luci-app-tailscale=y
 
 SQM
 
@@ -117,15 +118,23 @@ WATCHCAT
 
 CONFIG_PACKAGE_luci-app-watchcat=y
 
-ZERO TIER
-
-CONFIG_PACKAGE_luci-app-zerotier=y
-CONFIG_PACKAGE_zerotier=y
-
-FILE SHARING / SMB
+FILE SHARING
 
 CONFIG_PACKAGE_luci-app-ksmbd=y
 CONFIG_PACKAGE_ksmbd-server=y
+
+FILE MANAGER
+
+CONFIG_PACKAGE_luci-app-filemanager=y
+
+CPU
+
+CONFIG_PACKAGE_luci-app-cpufreq=y
+
+BASIC TOOLS
+
+CONFIG_PACKAGE_htop=y
+CONFIG_PACKAGE_qrencode=y
 
 USB WI-FI
 
@@ -134,24 +143,22 @@ MediaTek MT7601U - 2.4GHz
 CONFIG_PACKAGE_kmod-mt7601u=y
 CONFIG_PACKAGE_mt7601u-firmware=y
 
-MediaTek MT7612U - 2.4GHz + 5GHz
+MediaTek MT7612U - 2.4GHz / 5GHz
 
 CONFIG_PACKAGE_kmod-mt76x2u=y
 CONFIG_PACKAGE_kmod-mt76x2-common=y
 
-Realtek RTL8811CU
+Realtek RTL8811CU - 5GHz
 
 CONFIG_PACKAGE_kmod-rtw88-usb=y
 CONFIG_PACKAGE_kmod-rtw88-8811cu=y
 CONFIG_PACKAGE_rtw88-firmware=y
 
-Realtek RTL8812AU
+Realtek RTL8812AU - 2.4GHz / 5GHz
 
 CONFIG_PACKAGE_kmod-rtl8812au-ct=y
 
 USB ETHERNET
-
-Realtek RTL8152 / RTL8153
 
 CONFIG_PACKAGE_kmod-usb-net-rtl8152=y
 CONFIG_PACKAGE_r8152-firmware=y
@@ -166,27 +173,10 @@ BBR
 
 CONFIG_PACKAGE_kmod-tcp-bbr=y
 
-PERFORMANCE
+NETWORK PERFORMANCE
 
 CONFIG_PACKAGE_kmod-shortcut-fe-cm=y
 CONFIG_PACKAGE_kmod-fast-classifier=y
-
-CPU
-
-CONFIG_PACKAGE_luci-app-cpufreq=y
-
-FILE MANAGER
-
-CONFIG_PACKAGE_luci-app-filemanager=y
-
-THEME
-
-CONFIG_PACKAGE_luci-theme-aurora=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
-
-RESET BUTTON
-
-CONFIG_PACKAGE_kmod-gpio-button-hotplug=y
 
 OPENSSL
 
@@ -217,8 +207,13 @@ CONFIG_PACKAGE_kmod-drm-lima=y
 CONFIG_PACKAGE_kmod-multimedia-input=y
 CONFIG_PACKAGE_kmod-backlight-pwm=y
 
-F2FS
+THEME
 
-CONFIG_PACKAGE_kmod-fs-f2fs=y
+CONFIG_PACKAGE_luci-theme-aurora=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+
+RESET BUTTON
+
+CONFIG_PACKAGE_kmod-gpio-button-hotplug=y
 
 END
